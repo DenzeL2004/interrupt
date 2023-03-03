@@ -17,7 +17,9 @@ BYTE_FALSE  equ 00h
 
 CNT_REGISTERS equ 12d
 
-BUFFER_SIZE equ 200d
+BUFFER_SIZE   equ 200d
+
+VIDMEM_ADDRES equ 40d
 
 ;saves generals registers to curRegVal
 ;-----------------------------------------------------------------
@@ -222,7 +224,7 @@ Start:
         mov di, 0b800h
         mov es, di      ;set destination segment
 
-        xor di, di      ;set destination start addres
+        mov di, VIDMEM_ADDRES      ;set destination start addres
 
         mov si, cs
         mov ds, si      ;set source segment
@@ -241,7 +243,7 @@ Start:
         mov di, 0b800h
         mov es, di      ;set destination segment
 
-        xor di, di      ;set destination start addres
+        mov di, VIDMEM_ADDRES      ;set destination start addres
 
         mov si, cs
         mov ds, si      ;set source segment
@@ -382,7 +384,7 @@ Start:
         mov di, 0b800h
         mov es, di      ;set destination segment
 
-        xor di, di      ;set destination start addres
+        mov di, VIDMEM_ADDRES      ;set destination start addres
 
         mov si, cs
         mov ds, si      ;set source segment
