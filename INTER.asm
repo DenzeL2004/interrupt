@@ -9,8 +9,6 @@ FRAME_BUTTON equ 002d ;bscan code button '1'
 
 WIDTH_VID_MEM equ 80d
 
-REGS equ ax bx cx 
-
 HEIGHT_FRAME equ 0Eh
 WIDTH_FRAME equ 0Bh
 
@@ -24,12 +22,13 @@ BUFFER_SIZE   equ 200d
 VIDMEM_ADDRESS equ 0b800h
 VIDMEM_OFFSET  equ 0d
 
-;saves generals registers to curRegVal
+;-----------------------------------------------------------------
+;saves registers to curRegVal
 ;-----------------------------------------------------------------
 ;Assumes: cs
 ;Destroy: none
 ;-----------------------------------------------------------------
-SAVE_GEN_REG macro     
+SAVE_REG macro     
             
             push di
             pusha
@@ -46,12 +45,29 @@ SAVE_GEN_REG macro
 
             endm
 
+;-----------------------------------------------------------------
+;call DefNewInt by given number
+;-----------------------------------------------------------------
+;Assumes: cs
+;Entry: none
+;Destroy: none
+;-----------------------------------------------------------------
+CALL_DEF_INERRUPT macro number  
+            
+            mov cx, number&h 
+            push offset NewInt&number
+            push offset Old&number&Seg
+            push offset Old&number&Ofs
+            call DefNewInt
+
+            endm
+
 
 Start:
 
-    call DefNewInt09
+    CALL_DEF_INERRUPT 09
 
-    call DefNewInt08
+    CALL_DEF_INERRUPT 08
 
     ;resident memmory
     mov dx, offset ProgramEnd
@@ -63,32 +79,43 @@ Start:
     ;resident memmory
 
     ;-----------------------------------------------------------------
-	;set a new interrupt 09h function
+	;set a new interrupt 09h function (pascal)
 	;-----------------------------------------------------------------
-    ;Entry: none
+    ;Param:  [pb + 8] - new func interrupt address
+    ;        [pb + 6] - addres to save previous interrupt segmen, [pb + 4] - address to previous interrupt offset
+    ;Entry: cx - interrupt number
     ;Exit: Old09Ofs - offset previous interrupt 09h, Old09Seg - segment previous interrupt 09h
-    ;Destroy: di, es
+    ;Destroy: dx, di, si, es
 	;-----------------------------------------------------------------
-    DefNewInt09 proc
+    DefNewInt proc
+        push bp
+        mov bp, sp
+
         xor di, di
-        mov es, di      ;start interrupt table
-        mov di, 9d * 4d ;9th interrupt address
+        mov es, di  ;start interrupt table
+
+        shl cx, 2d
+        mov di, cx  ;interrupt address
     
         cli     ;stop all interrupts
+        mov si, word ptr [bp + 4] 
         mov dx, es:[di]         
-        mov Old09Ofs, dx             ;save old interrupt 09h offset
+        mov cs:[si], dx             ;save old interrupt 09h offset
 
-        mov es:[di], offset NewInt09 ;new offset  interrupt program
+        mov dx, word ptr [bp + 8]
+        mov es:[di], dx             ;new address interrupt program
 
+        mov si, word ptr [bp + 6] 
         mov dx, es:[di + 2]         
-        mov Old09Seg, dx             ;save old interrupt 09h offset
+        mov cs:[si], dx              ;save old interrupt 09h offset
 
         mov dx, cs                   ;new segment interrupt program
         mov es:[di + 2], dx          ;save new segment to interrupt table
         sti     ;start all interrupts
         
-        ret
-    DefNewInt09 endp
+        pop bp
+        ret 2d * 3d
+    DefNewInt endp
 
     ;-----------------------------------------------------------------
 	;Interrupt 09h function for drawing a frame on button click
@@ -126,34 +153,6 @@ Start:
     NewInt09 endp
 
     ;-----------------------------------------------------------------
-	;set a new interrupt 08h function
-	;-----------------------------------------------------------------
-    ;Entry: none
-    ;Exit: Old08Ofs - offset previous interrupt 08h, Old08Seg - segment previous interrupt 09h
-    ;Destroy: di, es
-	;-----------------------------------------------------------------
-    DefNewInt08 proc
-        xor di, di
-        mov es, di      ;start interrupt table
-        mov di, 8d * 4d ;8th interrupt address
-    
-        cli     ;stop all interrupts
-        mov dx, es:[di]         
-        mov Old08Ofs, dx             ;save old interrupt 09h offset
-
-        mov es:[di], offset NewInt08 ;new offset  interrupt program
-
-        mov dx, es:[di + 2]         
-        mov Old08Seg, dx             ;save old interrupt 09h offset
-
-        mov dx, cs                   ;new segment interrupt program
-        mov es:[di + 2], dx          ;save new segment to interrupt table
-        sti     ;start all interrupts
-        
-        ret
-    DefNewInt08 endp
-
-    ;-----------------------------------------------------------------
 	;Interrupt 08h function for drawing a frame on button click
 	;-----------------------------------------------------------------
     ;Entry: none
@@ -164,7 +163,7 @@ Start:
         pushf                         ;save flags
         push ax bx cx dx si di es ds  ;save registers
 
-        SAVE_GEN_REG
+        SAVE_REG
 
         cmp byte ptr cs:[flagFrameOn], TRUE
         jne @@restore   
@@ -200,8 +199,6 @@ Start:
 	;Destroy: ax, cx, dx, si, di, df
 	;-----------------------------------------------------------------
 	PrintRegValToVidmem	proc
-
-        SAVE_GEN_REG
 
         call CmpCurVidmem
        
@@ -461,7 +458,7 @@ Start:
         xor bx, bx
         @@next:
             mov dx, word ptr cs:[curRegVal + bx]
-            add di, 8d    ;shift by 3 cell
+            add di, 8d    ;shift by 4 cell
             call HexRep
 
             add di, 14d   ;shift by 7 cell
@@ -475,7 +472,7 @@ Start:
             inc bx
 
             add di, word ptr [bp + 4]  ;next line
-            sub di, 10d                 ;table alignment
+            sub di, 10d                ;table alignment
 
         cmp bx, CNT_REGISTERS * 2d ;draw all registers
         jne @@next
