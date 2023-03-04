@@ -4,13 +4,20 @@ model tiny
 locals @@
 org 100h
 
-HACKER_STYLE equ 0ah
-FRAME_BUTTON equ 002d ;bscan code button '1'
 
-WIDTH_VID_MEM equ 80d
+FRAME_BUTTON equ 002d ;bscan code button '1'
+SCAN_CODE_W  equ 17d
+SCAN_CODE_S  equ 31d
+SCAN_CODE_A  equ 30d
+SCAN_CODE_D  equ 32d
+
+
+
+WIDTH_VIDMEM equ 80d
 
 HEIGHT_FRAME equ 0Fh
 WIDTH_FRAME equ 0Bh
+HACKER_STYLE equ 0ah
 
 TRUE   equ 0FFh
 FALSE  equ 00h
@@ -134,10 +141,36 @@ Start:
         push ax      ;save registers
 
         in al, 60h    ;read from port 60h
+        
         cmp al, FRAME_BUTTON
         jne @@noFrame        
             not cs:[flagFrameOn]    ;button was entry
         @@noFrame:
+
+        cmp cs:[flagFrameOn], TRUE
+        jne @@dontCheckButton
+            
+            cmp al, SCAN_CODE_A
+            jne @@notA
+                mov cs:[difVidmemShift], -2d
+            @@notA:
+
+            cmp al, SCAN_CODE_W
+            jne @@notW
+                mov cs:[difVidmemShift], -1d * WIDTH_VIDMEM * 2d
+            @@notW:
+
+            cmp al, SCAN_CODE_S
+            jne @@notS
+                mov cs:[difVidmemShift], 1d * WIDTH_VIDMEM * 2d
+            @@notS:
+
+            cmp al, SCAN_CODE_D
+            jne @@notD
+                mov cs:[difVidmemShift], 2d
+            @@notD:
+
+        @@dontCheckButton:
 
         in al, 61h
         or al, 80h
@@ -183,6 +216,7 @@ Start:
             jne @@endif
                 call RestoreCommander
                 mov byte ptr cs:[flafNeedRestore], FALSE
+                mov word ptr cs:[vidmemShift], 0            ;need to draw new frame by start vidmem offset
         @@endif:
 
         mov al, 20h ;finished the current interrupt
@@ -206,6 +240,16 @@ Start:
 	;-----------------------------------------------------------------
 	PrintRegValToVidmem	proc
 
+        cmp cs:[difVidmemShift], 0
+        je @@dontShift
+            call RestoreCommander
+
+            mov ax, word ptr cs:[difVidmemShift]
+            add word ptr cs:[vidmemShift], ax
+
+            mov word ptr cs:[difVidmemShift], 0
+        @@dontShift:
+
         call CmpCurVidmem
        
         call PrintToDrawBuffer
@@ -213,6 +257,7 @@ Start:
         mov di, VIDMEM_ADDRESS     ;------------------
         mov es, di                 ;set destination segment
         mov di, VIDMEM_OFFSET      ;set destination start offset
+        add di, cs:[vidmemShift]
 
         mov si, cs                 ;------------------
         mov ds, si                 ;set source segment
@@ -261,7 +306,7 @@ Start:
     ;-----------------------------------------------------------------
 	;Copy chunck from drawBuffer to videomem 
 	;-----------------------------------------------------------------
-    ;Warning: width chunck source must be set HEIGHT_FRAME, WIDTH_FRAME, WIDTH_VID_MEM
+    ;Warning: width chunck source must be set HEIGHT_FRAME, WIDTH_FRAME, WIDTH_VIDMEM
     ;Assumes: es - destination buffer, ds - source buffer
     ;Entry: si - index sorurce byffer, di - index destination buffer
 	;Exit: none
@@ -278,7 +323,7 @@ Start:
             rep movsw              ;copy
 
             sub di, WIDTH_FRAME * 2d    ;------------------
-            add di, WIDTH_VID_MEM * 2d  ;address correction
+            add di, WIDTH_VIDMEM * 2d  ;address correction
 
         dec bx
         cmp bx, 0        ;if count of chuncks equels 0
@@ -301,6 +346,7 @@ Start:
         mov di, VIDMEM_ADDRESS     ;------------------
         mov es, di                 ;set destination segment
         mov di, VIDMEM_OFFSET      ;set destination start offset
+        add di, cs:[vidmemShift]
 
         mov si, cs                 ;------------------
         mov ds, si                 ;set source segment
@@ -328,7 +374,7 @@ Start:
             jne @@forByWidth           
             
             sub di, WIDTH_FRAME * 2d    ;------------------
-            add di, WIDTH_VID_MEM * 2d   ;address correction
+            add di, WIDTH_VIDMEM * 2d   ;address correction
 
         dec ch
         cmp ch, 0   ;if count of chuncks equel 0
@@ -349,6 +395,7 @@ Start:
         mov di, VIDMEM_ADDRESS     ;------------------
         mov es, di                 ;set destination segment
         mov di, VIDMEM_OFFSET      ;set destination start offset
+        add di, cs:[vidmemShift]
 
         mov si, cs                 ;------------------
         mov ds, si                 ;set source segment
@@ -523,6 +570,9 @@ flafNeedRestore   dp 0
 regGenName dw "ax", "bx", "cx", "dx", "si", "di", "sp", "dp", "ds", "es", "ss", "cs", "ip"    ;registers name
 regAdrPrt  dw 0 ;address where to write register values
 curRegVal  dw CNT_REGISTERS dup (0) ;current registers value
+
+vidmemShift dw 0
+difVidmemShift dw 0
 
 frameSample1 db 0dah, 0c4h, 0bfh, 0c3h, 20h, 0b4h, 0c0h, 0c4h, 0d9h  ;patern for frame
 
