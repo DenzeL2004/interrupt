@@ -1,4 +1,5 @@
-INTER.COM
-INTER.LST
-INTER.OBJ
-INTER.MAP
+/*.COM
+/*.LST
+/*.OBJ
+/*.MAP
+test.asm

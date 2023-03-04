@@ -9,13 +9,13 @@ FRAME_BUTTON equ 002d ;bscan code button '1'
 
 WIDTH_VID_MEM equ 80d
 
-HEIGHT_FRAME equ 0Eh
+HEIGHT_FRAME equ 0Fh
 WIDTH_FRAME equ 0Bh
 
 TRUE   equ 0FFh
 FALSE  equ 00h
 
-CNT_REGISTERS equ 12d
+CNT_REGISTERS equ 13d
 
 BUFFER_SIZE   equ 200d
 
@@ -31,8 +31,13 @@ VIDMEM_OFFSET  equ 0d
 SAVE_REG macro     
             
             push di
+
             pusha
-            push ds es ss cs
+
+            mov di, sp
+            mov di, word ptr ss:[di + 18d] ;get previous ip
+
+            push ds es ss cs di ;di = ip
 
             mov di, CNT_REGISTERS * 2d
             @@next:
@@ -160,10 +165,11 @@ Start:
     ;Destroy: ax, cx, dx, si, di, es, ds
 	;-----------------------------------------------------------------
     NewInt08 proc
-        pushf                         ;save flags
-        push ax bx cx dx si di es ds  ;save registers
 
         SAVE_REG
+
+        pushf                         ;save flags
+        push ax bx cx dx si di es ds  ;save registers
 
         cmp byte ptr cs:[flagFrameOn], TRUE
         jne @@restore   
@@ -514,7 +520,7 @@ hexCode db "0123456789ABCDEF" ;hex represenation
 flagFrameOn db 0
 flafNeedRestore   dp 0
 
-regGenName dw "ax", "bx", "cx", "dx", "si", "di", "sp", "dp", "ds", "es", "ss", "cs"    ;registers name
+regGenName dw "ax", "bx", "cx", "dx", "si", "di", "sp", "dp", "ds", "es", "ss", "cs", "ip"    ;registers name
 regAdrPrt  dw 0 ;address where to write register values
 curRegVal  dw CNT_REGISTERS dup (0) ;current registers value
 
