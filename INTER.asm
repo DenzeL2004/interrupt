@@ -9,17 +9,20 @@ FRAME_BUTTON equ 002d ;bscan code button '1'
 
 WIDTH_VID_MEM equ 80d
 
-HIGHT_FRAME equ 0Eh
+REGS equ ax bx cx 
+
+HEIGHT_FRAME equ 0Eh
 WIDTH_FRAME equ 0Bh
 
-BYTE_TRUE   equ 0FFh
-BYTE_FALSE  equ 00h
+TRUE   equ 0FFh
+FALSE  equ 00h
 
 CNT_REGISTERS equ 12d
 
 BUFFER_SIZE   equ 200d
 
-VIDMEM_ADDRES equ 40d
+VIDMEM_ADDRESS equ 0b800h
+VIDMEM_OFFSET  equ 0d
 
 ;saves generals registers to curRegVal
 ;-----------------------------------------------------------------
@@ -43,26 +46,6 @@ SAVE_GEN_REG macro
 
             endm
 
-;-----------------------------------------------------------------
-;Dealy of programm
-;-----------------------------------------------------------------
-;Entry:   none
-;Exit:    none
-;Destroy: none
-;-----------------------------------------------------------------
-Delay   macro cnt
-            
-        push cx
-        
-        xor cx, cx
-        dec cx
-        @@delay:
-            nop
-        loop @@delay
-
-        pop cx
-
-        endm
 
 Start:
 
@@ -112,7 +95,7 @@ Start:
 	;-----------------------------------------------------------------
     ;Entry: none
     ;Exit: none
-    ;Destroy: ax, cx, dx, si, di, es, ds
+    ;Destroy: ax
 	;-----------------------------------------------------------------
     NewInt09 proc
         pushf        ;save flags
@@ -121,7 +104,7 @@ Start:
         in al, 60h    ;read from port 60h
         cmp al, FRAME_BUTTON
         jne @@noFrame        
-            not cs:[flagEntryButton]    ;button was entry
+            not cs:[flagFrameOn]    ;button was entry
         @@noFrame:
 
         in al, 61h
@@ -133,7 +116,7 @@ Start:
         mov al, 20h ;finished the current interrupt
         out 20h, al ;we can move on to the next interrupt
 
-        pop ax   ;restore registers
+        pop ax      ;restore registers
         popf        ;restore flags
 
         db 0eah     ;far jump
@@ -178,31 +161,30 @@ Start:
     ;Destroy: ax, cx, dx, si, di, es, ds
 	;-----------------------------------------------------------------
     NewInt08 proc
-        pushf                   ;save flags
+        pushf                         ;save flags
         push ax bx cx dx si di es ds  ;save registers
 
         SAVE_GEN_REG
 
-        cmp byte ptr cs:[flagEntryButton], BYTE_TRUE
-        jne @@printReg   
-            call RegInfo
-            Delay
+        cmp byte ptr cs:[flagFrameOn], TRUE
+        jne @@restore   
+            call PrintRegValToVidmem
             
-            mov byte ptr cs:[flagSwitchOff], BYTE_TRUE
+            mov byte ptr cs:[flafNeedRestore], TRUE
             jmp @@endif
-        @@printReg:
+        @@restore:
 
-            cmp byte ptr cs:[flagSwitchOff], BYTE_TRUE
+            cmp byte ptr cs:[flafNeedRestore], TRUE
             jne @@endif
-                call DrawComandor
-                mov byte ptr cs:[flagSwitchOff], BYTE_FALSE
+                call RestoreCommander
+                mov byte ptr cs:[flafNeedRestore], FALSE
         @@endif:
 
         mov al, 20h ;finished the current interrupt
         out 20h, al ;we can move on to the next interrupt
 
         pop ds es di si dx cx bx ax   ;restore registers
-        popf                    ;restore flags
+        popf                          ;restore flags
 
         db 0eah     ;far jump
     Old08Ofs dw 0   ;old offset of 09h interrupt
@@ -217,47 +199,25 @@ Start:
 	;Exit: none
 	;Destroy: ax, cx, dx, si, di, df
 	;-----------------------------------------------------------------
-	RegInfo	proc
+	PrintRegValToVidmem	proc
 
         SAVE_GEN_REG
 
-        mov di, 0b800h
-        mov es, di      ;set destination segment
-
-        mov di, VIDMEM_ADDRES      ;set destination start addres
-
-        mov si, cs
-        mov ds, si      ;set source segment
-
-        mov si, offset drawBuffer      ;set source start addres
-
-        push WIDTH_FRAME * 2d       ;-------------------
-        push WIDTH_VID_MEM * 2d     ;-------------------
-        push HIGHT_FRAME            ;-------------------
-        mov bx, offset saveBuffer   ;parametors for func
-
-        call CmpBuffers
+        call CmpCurVidmem
        
         call PrintToDrawBuffer
 
-        mov di, 0b800h
-        mov es, di      ;set destination segment
+        mov di, VIDMEM_ADDRESS     ;------------------
+        mov es, di                 ;set destination segment
+        mov di, VIDMEM_OFFSET      ;set destination start offset
 
-        mov di, VIDMEM_ADDRES      ;set destination start addres
-
-        mov si, cs
-        mov ds, si      ;set source segment
-
-        mov si, offset drawBuffer      ;set source start addres
-
-        push WIDTH_FRAME * 2d       ;-------------------
-        push WIDTH_VID_MEM * 2d     ;-------------------
-        push HIGHT_FRAME            ;parametors for func
-
-        call CoppyBuffer
+        mov si, cs                 ;------------------
+        mov ds, si                 ;set source segment
+        mov si, offset drawBuffer  ;set source start offset
+        call CopyBufToVidmem   ;copy
 
         ret
-	RegInfo	endp    
+	PrintRegValToVidmem	endp    
 
     ;-----------------------------------------------------------------
 	;Draw in drawbuffer
@@ -270,19 +230,19 @@ Start:
 	PrintToDrawBuffer	proc
         mov  di, cs
         
-        push es
-        mov es, di  ;change segment to correct work strok functions
+        push es     ;save current es value
+        mov es, di  ;change segment to correct work string functions
 
-        push ds 
-        mov ds, di  ;change segment to correct work strok functions
+        push ds     ;save current ds value
+        mov ds, di  ;change segment to correct work string functions
 
-        mov di, offset drawBuffer   ;draw buffer addres
+        mov di, offset drawBuffer   ;draw buffer address
 
         push WIDTH_FRAME * 2d       ;drawDuffer's shift
-        push ((HIGHT_FRAME shl 8d) or WIDTH_FRAME) ;hight:width
+        push ((HEIGHT_FRAME shl 8d) or WIDTH_FRAME) ;height:width
 
-        push offset frameSample1    ;sample
-        push HACKER_STYLE           ;style
+        push offset frameSample1    ;frame's sample
+        push HACKER_STYLE           ;frame's style
         call DrawFrame
 
         mov word ptr cs:[regAdrPrt], (offset drawBuffer + WIDTH_FRAME * 1d * 2d + 1d * 2d) ;shift 
@@ -290,121 +250,117 @@ Start:
         push WIDTH_FRAME * 2d       ;shift
         call PrintReg
 
-        pop ds es     ;recover ds es
+        pop ds es     ;restore ds es
 
         ret
 	PrintToDrawBuffer	endp  
 
     ;-----------------------------------------------------------------
-	;Coppy chanck of memory 
+	;Copy chunck from drawBuffer to videomem 
 	;-----------------------------------------------------------------
-    ;Param: [bp + 8] - width chanck source, [bp + 6] - width chanck destination,  
-    ;       [bp + 4] - count of chancks  
-    ;Warning: width chanck source must be less than width chanck destination
+    ;Warning: width chunck source must be set HEIGHT_FRAME, WIDTH_FRAME, WIDTH_VID_MEM
     ;Assumes: es - destination buffer, ds - source buffer
     ;Entry: si - index sorurce byffer, di - index destination buffer
 	;Exit: none
-	;Destroy: si, di, cx, df
+	;Destroy: bx, cx, si, di, es, ds, df
 	;-----------------------------------------------------------------
-	CoppyBuffer	proc
-        push bp
-		mov bp, sp
+	CopyBufToVidmem	proc
 
         cld 		;DF = 0
-		
+
+        mov bx, HEIGHT_FRAME
         @@next:
 
-            mov cx, word ptr [bp + 8]   ;counter
-            shr cx, 1d                  ;cx /= 2 because width chanc mul 2(for correct recalculation) 
+            mov cx, WIDTH_FRAME    ;counter
+            rep movsw              ;copy
 
-            rep movsw                   ;coppy
+            sub di, WIDTH_FRAME * 2d    ;------------------
+            add di, WIDTH_VID_MEM * 2d  ;address correction
 
-            sub di, word ptr [bp + 8]   ;------------------
-            add di, word ptr [bp + 6]   ;address correction
-
-        dec word ptr [bp + 4]
-        cmp word ptr [bp + 4], 0        ;if count of chancks equel 0
+        dec bx
+        cmp bx, 0        ;if count of chuncks equels 0
         jne @@next
 		
-		pop bp
-		ret 2d * 3d
-	CoppyBuffer	endp  
+		ret
+	CopyBufToVidmem	endp  
 
     ;-----------------------------------------------------------------
-	;Compare two buffers 
+	;Compare draw buffer with vidmem.
 	;-----------------------------------------------------------------
-    ;Param: [bp + 8] - width chanck source, [bp + 6] - width chanck destination,  
-    ;       [bp + 4] - count of chancks  
-    ;Warning: width chanck source must be less than width chanck destination
+    ;Warning: width chunck source must be less than width chunck destination
     ;Assumes: es - destination buffer, ds - source buffer
     ;Entry: si - index sorurce byffer, di - index destination buffer, bx - index fo result index (indexing by segment ds)
 	;Exit: none
 	;Destroy: bx, cx, dx, si, di, df
 	;-----------------------------------------------------------------
-	CmpBuffers	proc
-        push bp
-		mov bp, sp
+	CmpCurVidmem	proc
+
+        mov di, VIDMEM_ADDRESS     ;------------------
+        mov es, di                 ;set destination segment
+        mov di, VIDMEM_OFFSET      ;set destination start offset
+
+        mov si, cs                 ;------------------
+        mov ds, si                 ;set source segment
+        mov si, offset drawBuffer  ;set source start offset
+        
+        mov bx, offset saveBuffer   ;parameters for func
 
         cld 		;DF = 0
 		
-        @@forByHight:
+        mov ch, HEIGHT_FRAME
+        @@forByHeight:
 
-            mov cx, word ptr [bp + 8]   ;counter
-            shr cx, 1d                  ;cx /= 2 because width chanc mul 2(for correct recalculation) 
-
+            mov cl, WIDTH_FRAME   ;counter
             @@forByWidth:
                 cmpsw            ;check es:[di] == ds:[si] ?
                 je @@equal
                     mov dx, word ptr es:[di - 2d]
                     mov word ptr ds:[bx], dx
                 @@equal:
-                add bx, 2d
-            loop @@forByWidth           
-            
-            sub di, word ptr [bp + 8]   ;------------------
-            add di, word ptr [bp + 6]   ;address correction
 
-        dec word ptr [bp + 4]
-        cmp word ptr [bp + 4], 0        ;if count of chancks equel 0
-        jne @@forByHight
-		
-		pop bp
-		ret 2d * 3d
-	CmpBuffers	endp 
+                add bx, 2d
+            
+            dec cl
+            cmp cl, 0   ;if count of chuncks equel 0
+            jne @@forByWidth           
+            
+            sub di, WIDTH_FRAME * 2d    ;------------------
+            add di, WIDTH_VID_MEM * 2d   ;address correction
+
+        dec ch
+        cmp ch, 0   ;if count of chuncks equel 0
+        jne @@forByHeight
+	
+        ret
+	CmpCurVidmem	endp 
 
     ;-----------------------------------------------------------------
-	;Draw frame with registers value
+	;Restores the original picture
 	;-----------------------------------------------------------------
     ;Entry:none
 	;Exit: none
 	;Destroy: ax, cx, dx, si, di, df
 	;-----------------------------------------------------------------
-	DrawComandor proc
+	RestoreCommander proc
 
-        mov di, 0b800h
-        mov es, di      ;set destination segment
+        mov di, VIDMEM_ADDRESS     ;------------------
+        mov es, di                 ;set destination segment
+        mov di, VIDMEM_OFFSET      ;set destination start offset
 
-        mov di, VIDMEM_ADDRES      ;set destination start addres
+        mov si, cs                 ;------------------
+        mov ds, si                 ;set source segment
+        mov si, offset saveBuffer  ;set source start offset
 
-        mov si, cs
-        mov ds, si      ;set source segment
-
-        mov si, offset saveBuffer      ;set source start addres
-
-        push WIDTH_FRAME * 2d       ;-------------------
-        push WIDTH_VID_MEM * 2d     ;-------------------
-        push HIGHT_FRAME            ;parametors for func
-
-        call CoppyBuffer
+        call CopyBufToVidmem
 
         ret
-	DrawComandor	endp
+	RestoreCommander	endp
 
     ;-----------------------------------------------------------------
 	;Draw frame in video memory (pascal)
 	;-----------------------------------------------------------------
 	;Param: [bp + 4] - frame's color, [bp + 6] - frame's sample
-	;		[bp + 8] - frame's width, [bp + 9] - frame's highth
+	;		[bp + 8] - frame's width, [bp + 9] - frame's heighth
     ;       [bp + 10] - shift in buffer
 	;Assumes: es = VIDMEM_ADR, ds = sourse segment
 	;Entry: di (destination index), si (source index)
@@ -429,7 +385,7 @@ Start:
 		sub di, cx	;return di to start line
 		add di, word ptr [bp + 10] ;next line
 
-		sub byte ptr [bp + 9], 2d 	;hight -= 2
+		sub byte ptr [bp + 9], 2d 	;height -= 2
 
 		@@next:
 			mov cl, byte ptr [bp + 8] 	;cx = width
@@ -443,7 +399,7 @@ Start:
 			sub di, cx	;return di to start line
 			add di, word ptr [bp + 10] ;next line
 			
-		dec byte ptr [bp + 9] 		;hight--
+		dec byte ptr [bp + 9] 		;height--
 		cmp byte ptr [bp + 9], 0d	;-----------------------
 		jne @@next  ;check condition вр != 0
 		
@@ -521,7 +477,7 @@ Start:
             add di, word ptr [bp + 4]  ;next line
             sub di, 10d                 ;table alignment
 
-        cmp bx, CNT_REGISTERS * 2d ;dra all registers
+        cmp bx, CNT_REGISTERS * 2d ;draw all registers
         jne @@next
 
         pop bp
@@ -558,8 +514,8 @@ Start:
 
 hexCode db "0123456789ABCDEF" ;hex represenation
 
-flagEntryButton db 0
-flagSwitchOff   dp 0
+flagFrameOn db 0
+flafNeedRestore   dp 0
 
 regGenName dw "ax", "bx", "cx", "dx", "si", "di", "sp", "dp", "ds", "es", "ss", "cs"    ;registers name
 regAdrPrt  dw 0 ;address where to write register values
